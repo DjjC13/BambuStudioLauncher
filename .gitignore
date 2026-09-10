@@ -1,0 +1,22 @@
+# Per-user state, written at runtime - never commit
+config.json
+backups/
+diagnostics_*.txt
+
+# Build output
+build/
+dist/
+*.spec
+
+# Generated previews (regenerate with make_icon.py / logo_options.py)
+preview_icon.png
+logo_options.png
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Machine-specific: embeds absolute paths to wherever it was created
+Bambu Studio Launcher.lnk

@@ -25,6 +25,7 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 
 import bambu_core as core
+import bambu_tray
 
 COFFEE_URL = "http://buymeacoffee.com/DjjC13"
 
@@ -68,6 +69,8 @@ class Launcher(tk.Tk):
         self.sections: dict[str, dict] = {}
         self._syncing = False
         self._gfx_loaded = False
+        self._tray: bambu_tray.TrayIcon | None = None
+        self._hidden = False
 
         self.title("Bambu Studio Launcher")
         self.configure(bg=BG)
@@ -497,6 +500,14 @@ class Launcher(tk.Tk):
     # ---------------------------------------------------------- section: log
 
     def _body_log(self, body) -> None:
+        self.tray_var = tk.BooleanVar(value=self.cfg["minimize_to_tray"])
+        self.close_with_var = tk.BooleanVar(value=self.cfg["close_with_bambu"])
+        self._check(body, "Minimise to the notification area while Bambu Studio runs",
+                    self.tray_var).pack(anchor="w", pady=(4, 0))
+        self._check(body, "Close the launcher when Bambu Studio exits normally",
+                    self.close_with_var).pack(anchor="w", pady=(4, 0))
+        self._rule(body, pady=(12, 10))
+
         self.console = tk.Text(body, height=9, bg="#101216", fg="#c3c9d2", bd=0,
                                font=("Consolas", 9), wrap="word", padx=12, pady=9,
                                highlightthickness=0, state="disabled")
@@ -731,16 +742,88 @@ class Launcher(tk.Tk):
                 pid, core.describe_mask(mask) if mask else "all CPUs",
                 self.prio_var.get().lower()), "ok")
             self.after(1500, self.refresh_status)
+            # Long enough for the launch line to be read before the window goes.
+            self.after(1800, lambda: self._to_tray(pid))
 
         self._run_bg(go, done)
 
+    # ------------------------------------------------------- tray monitoring
+
+    def _to_tray(self, pid: int) -> None:
+        """Hide the launcher and keep watch from the notification area."""
+        if not self.tray_var.get():
+            return
+
+        self._tray = bambu_tray.TrayIcon(
+            "Bambu Studio running (PID {})".format(pid),
+            ICON_ICO,
+            # Tray callbacks arrive on the tray's own message-loop thread;
+            # hand them to Tk rather than touching widgets from there.
+            on_activate=lambda: self.after(0, self._restore_window),
+            on_quit=lambda: self.after(0, self._on_close),
+        )
+        if self._tray.show():
+            self._hidden = True
+            self.withdraw()
+            self.log("Minimised to the notification area. Monitoring Bambu Studio.")
+        else:
+            self._tray = None
+            self._hidden = True
+            self.iconify()
+            self.log("Notification area unavailable; minimised to the taskbar "
+                     "instead. Monitoring continues.", "warn")
+
+    def _close_tray(self) -> None:
+        if self._tray is not None:
+            self._tray.close()
+            self._tray = None
+
+    def _restore_window(self) -> None:
+        self._hidden = False
+        self.deiconify()
+        self.lift()
+        self.attributes("-topmost", True)
+        self.after(400, lambda: self.attributes("-topmost", False))
+        try:
+            self.focus_force()
+        except tk.TclError:
+            pass
+
+    def _open_section(self, key: str) -> None:
+        if not self.sections[key]["open"]:
+            self._toggle_section(key)
+
     def _on_exit(self, code: int) -> None:
+        """Called on the process-watcher thread when Bambu Studio ends."""
         clean, desc = core.explain_exit_code(code)
+        self.after(0, lambda: self._handle_exit(clean, desc))
+
+    def _handle_exit(self, clean: bool, desc: str) -> None:
         self.log("Bambu Studio {}".format(desc), "ok" if clean else "err")
-        if not clean:
-            self.log("Plugin & Maintenance → Diagnostics report captures the details.",
-                     "warn")
-        self.after(0, self.refresh_status)
+
+        if clean:
+            # A normal quit is the user's decision to stop; follow them out.
+            if self._hidden and self.close_with_var.get():
+                self._close_tray()
+                self._on_close()
+                return
+            self._close_tray()
+            if self._hidden:
+                self._restore_window()
+            self.refresh_status()
+            return
+
+        # A crash is the one case worth interrupting for: surface the window
+        # with the activity log already open on the decoded fault.
+        if self._tray is not None:
+            self._tray.notify("Bambu Studio crashed", desc, "error")
+            # Leave the icon up briefly so the balloon is not cut off.
+            self.after(8000, self._close_tray)
+        self._restore_window()
+        self._open_section("log")
+        self.log("Plugin & Maintenance → Diagnostics report captures the details.",
+                 "warn")
+        self.refresh_status()
 
     def _simple_action(self, fn) -> None:
         def done(result):
@@ -850,12 +933,15 @@ class Launcher(tk.Tk):
             "priority": self.prio_var.get(),
             "check_plugin_on_launch": self.check_var.get(),
             "auto_sync_plugin": self.autosync_var.get(),
+            "minimize_to_tray": self.tray_var.get(),
+            "close_with_bambu": self.close_with_var.get(),
             "exe": str(self.exe),
         })
         core.save_cfg(self.cfg)
 
     def _on_close(self) -> None:
         self._save_state()
+        self._close_tray()
         self.destroy()
 
 

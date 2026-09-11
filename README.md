@@ -21,6 +21,8 @@ are required. All data is written within the current user profile.
 ## Features
 
 - Applies a CPU affinity mask before the target process executes any code
+- Withdraws to the notification area once Bambu Studio is running, and returns
+  on its own if Bambu Studio crashes
 - Detects and repairs partially applied Bambu network plugin updates
 - Sets the Windows per-application GPU preference
 - Reports the NVIDIA driver setting responsible for crashes during slicing
@@ -57,7 +59,32 @@ other. Each collapsed heading displays a summary on the right.
 | **CPU & Performance** | Affinity presets, mask entry, priority, per-CPU grid |
 | **Graphics & NVIDIA** | Adapter list, GPU preference, Threaded Optimization |
 | **Plugin & Maintenance** | Plugin state, launch checks, repair actions |
-| **Activity** | Log of launcher operations |
+| **Activity** | Monitoring options and the launcher's operation log |
+
+### Monitoring
+
+Once Bambu Studio has started, the launcher withdraws to the notification area
+and watches the process from there. What happens next depends on how Bambu
+Studio ends.
+
+| Outcome | Behaviour |
+|---|---|
+| Exits normally | The launcher closes silently. Having started the application and seen it finish, it has nothing further to do. |
+| Crashes | The launcher restores itself, opens the activity log on the decoded fault, and raises a notification. |
+
+The tray icon may be clicked at any time to restore the window, or
+right-clicked for **Show launcher** and **Quit**. Quitting the launcher does not
+affect Bambu Studio.
+
+Both behaviours are optional and are controlled from the **Activity** section:
+
+- **Minimise to the notification area while Bambu Studio runs** — when
+  disabled, the launcher stays open throughout.
+- **Close the launcher when Bambu Studio exits normally** — when disabled, the
+  window is restored instead of closing.
+
+Should the notification area be unavailable, the launcher minimises to the
+taskbar and monitoring continues unchanged.
 
 ### Status indicators
 
@@ -148,7 +175,8 @@ before starting the application; it is disabled by default.
 
 The launcher retains a handle to the process and reports its exit code on
 termination. Normal exits are logged as such; faults are logged with the
-decoded status, for example `0xC0000005 - access violation`.
+decoded status, for example `0xC0000005 - access violation`, and cause the
+window to be restored as described under [Monitoring](#monitoring).
 
 ## Configuration
 
@@ -196,6 +224,7 @@ SHA-256 published with each release verifies the downloaded asset only.
 ```
 bambu_launcher.py    User interface
 bambu_core.py        Process launching, plugin checks, log cleanup, event log
+bambu_tray.py        Notification-area icon, via Shell_NotifyIcon and ctypes
 build_exe.py         PyInstaller build script
 Bambu Launcher.bat   Runs from source without a console window
 make_icon.py         Generates icon.ico and icon.png (requires Pillow)

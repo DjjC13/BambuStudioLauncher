@@ -79,6 +79,8 @@ DEFAULTS = {
     "check_plugin_on_launch": True,
     "auto_sync_plugin": False,
     "keep_dumps": 2,
+    "minimize_to_tray": True,
+    "close_with_bambu": True,
 }
 
 PRIORITY_CLASSES = {

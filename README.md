@@ -23,6 +23,8 @@ are required. All data is written within the current user profile.
 - Applies a CPU affinity mask before the target process executes any code
 - Withdraws to the notification area once Bambu Studio is running, and returns
   on its own if Bambu Studio crashes
+- Optionally starts hidden and launches Bambu Studio unattended, appearing only
+  if a check fails
 - Detects and repairs partially applied Bambu network plugin updates
 - Sets the Windows per-application GPU preference
 - Reports the NVIDIA driver setting responsible for crashes during slicing
@@ -85,6 +87,34 @@ Both behaviours are optional and are controlled from the **Activity** section:
 
 Should the notification area be unavailable, the launcher minimises to the
 taskbar and monitoring continues unchanged.
+
+### Unattended start
+
+**Start hidden and launch Bambu Studio automatically**, also under **Activity**,
+is disabled by default. Enabled, the launcher never appears when everything is
+in order: it starts hidden, runs its checks, starts Bambu Studio, and watches
+from the notification area. With the two options above also enabled, the entire
+session passes without a window — the launcher simply closes once Bambu Studio
+does.
+
+It reveals itself if any check fails, and states the reason in the activity
+log. The checks are:
+
+| Check | Failure behaviour |
+|---|---|
+| Bambu Studio is installed at the configured path | Window shown |
+| Bambu Studio is not already running | Window shown |
+| At least one CPU is selected, if **Limit CPUs** is set | Window shown |
+| A network plugin is installed | Window shown |
+| The plugin is current | Repaired if **Auto-repair** is enabled, otherwise window shown |
+
+The mode is deliberately quiet only when nothing is wrong. A stale plugin or a
+missing installation brings the window up rather than failing silently.
+
+> Hold **Shift** while starting the launcher to bypass unattended start for
+> that run. This is the way back to the window if the option is enabled and
+> Bambu Studio starts cleanly every time; the tray icon also restores it while
+> Bambu Studio is running.
 
 ### Status indicators
 

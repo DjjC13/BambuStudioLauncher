@@ -49,6 +49,22 @@ DANGER = "#e5555a"
 BLUE = "#5b9df0"
 COFFEE = "#e0a33a"
 
+VK_SHIFT = 0x10
+
+
+def shift_held() -> bool:
+    """True if Shift is down right now.
+
+    Unattended start hides the window, so holding Shift during startup is the
+    escape hatch that brings the launcher up normally and lets the option be
+    switched off again.
+    """
+    try:
+        return bool(ctypes.windll.user32.GetAsyncKeyState(VK_SHIFT) & 0x8000)
+    except Exception:
+        return False
+
+
 HERE = Path(__file__).resolve().parent
 # Icons are bundled resources; in a frozen build they live in the temp
 # extraction directory, not beside the executable. See bambu_core.RESOURCE_DIR.
@@ -89,6 +105,13 @@ class Launcher(tk.Tk):
         self.refresh_status()
         self._load_graphics()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        if self.cfg["auto_start"] and not shift_held():
+            self.withdraw()
+            self._hidden = True
+            self.after(700, self._auto_start)
+        elif self.cfg["auto_start"]:
+            self.log("Shift held — unattended start skipped for this run.", "warn")
 
     # ---------------------------------------------------------------- style
 
@@ -506,6 +529,16 @@ class Launcher(tk.Tk):
                     self.tray_var).pack(anchor="w", pady=(4, 0))
         self._check(body, "Close the launcher when Bambu Studio exits normally",
                     self.close_with_var).pack(anchor="w", pady=(4, 0))
+
+        self.auto_var = tk.BooleanVar(value=self.cfg["auto_start"])
+        self._check(body, "Start hidden and launch Bambu Studio automatically",
+                    self.auto_var).pack(anchor="w", pady=(4, 0))
+        self._label(body,
+                    "Unattended mode. The launcher starts hidden, runs its checks, and\n"
+                    "starts Bambu Studio only if they pass; otherwise it shows itself and\n"
+                    "explains why. Hold Shift while starting to bypass it.",
+                    style="Faint.TLabel", pady=(3, 0))
+
         self._rule(body, pady=(12, 10))
 
         self.console = tk.Text(body, height=9, bg="#101216", fg="#c3c9d2", bd=0,
@@ -747,11 +780,62 @@ class Launcher(tk.Tk):
 
         self._run_bg(go, done)
 
+    # ------------------------------------------------------ unattended start
+
+    def _auto_start(self) -> None:
+        """Verify everything, then start Bambu Studio without ever appearing.
+
+        Anything unexpected reveals the window instead. The point of the mode
+        is to be invisible when all is well, not to be silent when it is not.
+        """
+        self.log("Unattended start: running checks.")
+
+        # Read the Tk variables here; the checks themselves run off-thread.
+        use_aff = self.use_aff.get()
+        mask = self._current_mask() if use_aff else 0
+        autosync = self.autosync_var.get()
+
+        def check():
+            if not self.exe.exists():
+                return "Bambu Studio was not found at {}".format(self.exe)
+            if core.is_running():
+                return "Bambu Studio is already running"
+            if use_aff and not mask:
+                return "No CPUs are selected"
+
+            st = core.plugin_status()
+            if st["state"] == "absent":
+                return "No network plugin is installed"
+            if st["state"] == "stale":
+                if not autosync:
+                    return "The network plugin is out of date: {}".format(st["detail"])
+                ok, msg = core.sync_plugins()
+                self.log(msg, "ok" if ok else "err")
+                if not ok:
+                    return "The network plugin could not be repaired automatically"
+            return None
+
+        def done(problem):
+            if problem:
+                self.log(problem, "warn")
+                self.log("Unattended start stopped. Showing the launcher.", "warn")
+                self._restore_window()
+                self._open_section("plugin" if "plugin" in problem.lower() else "log")
+                return
+            self.log("Checks passed.", "ok")
+            self.do_launch()
+
+        self._run_bg(check, done)
+
     # ------------------------------------------------------- tray monitoring
 
     def _to_tray(self, pid: int) -> None:
         """Hide the launcher and keep watch from the notification area."""
         if not self.tray_var.get():
+            # An unattended start leaves the window withdrawn. Without a tray
+            # icon there would be no way back to it, so show it instead.
+            if self._hidden:
+                self._restore_window()
             return
 
         self._tray = bambu_tray.TrayIcon(
@@ -935,6 +1019,7 @@ class Launcher(tk.Tk):
             "auto_sync_plugin": self.autosync_var.get(),
             "minimize_to_tray": self.tray_var.get(),
             "close_with_bambu": self.close_with_var.get(),
+            "auto_start": self.auto_var.get(),
             "exe": str(self.exe),
         })
         core.save_cfg(self.cfg)

@@ -81,6 +81,7 @@ DEFAULTS = {
     "keep_dumps": 2,
     "minimize_to_tray": True,
     "close_with_bambu": True,
+    "auto_start": False,
 }
 
 PRIORITY_CLASSES = {

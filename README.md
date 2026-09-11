@@ -1,256 +1,217 @@
 # Bambu Studio Launcher
 
-A small Windows control panel that launches Bambu Studio pinned to the CPU
-cores you choose, keeps its network plugin healthy, and surfaces the documented
-NVIDIA fixes for Bambu Studio's slicing crashes.
+A Windows control panel for Bambu Studio. It pins the application to selected
+CPU cores, verifies the integrity of its network plugin, and applies the
+documented remedies for the NVIDIA driver faults that crash Bambu Studio during
+slicing.
 
 ![Bambu Studio Launcher](docs/screenshot.png)
 
 ## Download
 
-Grab **BambuStudioLauncher.exe** from the
+Download `BambuStudioLauncher.exe` from the
 [latest release](https://github.com/DjjC13/BambuStudioLauncher/releases/latest).
-Nothing to install - it is a single file and needs no Python, no admin rights,
-and writes only to your own user profile.
 
-> **SmartScreen will warn you the first time.** The exe is unsigned, because
-> code-signing certificates cost money. Click *More info* then *Run anyway*, or
-> build it yourself from source with `python build_exe.py` if you would rather
-> not take my word for it.
+It is a single file. No installation, no Python, and no administrator rights
+are required. All data is written within the current user profile.
 
-## Running from source
+> The executable is unsigned, so SmartScreen will warn on first run. Select
+> **More info → Run anyway**, or build from source as described below.
+
+## Features
+
+- Applies a CPU affinity mask before the target process executes any code
+- Detects and repairs partially applied Bambu network plugin updates
+- Sets the Windows per-application GPU preference
+- Reports the NVIDIA driver setting responsible for crashes during slicing
+- Reads crash history from the Windows event log and decodes process exit codes
+- Removes the crash dumps that Bambu Studio accumulates without limit
+
+## Background
+
+Bambu Studio was observed crashing on a test machine in nearly every session —
+33 faults over three weeks, each with an identical signature:
+
+```
+Faulting module: bambu_networking.dll
+Exception:       0xC0000005 access violation, READ
+Fault offset:    +0xD5447A
+```
+
+The cause was a partially applied plugin update. Bambu Studio had staged an OTA
+plugin package in `%APPDATA%\BambuStudio\ota\plugins` and applied it to every
+DLL except `bambu_networking.dll`, which remained on an earlier build. The
+resulting version mismatch caused the networking component to dereference an
+invalid pointer on a worker thread.
+
+The launcher checks for this condition before every launch.
+
+## Usage
+
+The window opens at 760 × 300 with a status line, four collapsed sections, and
+the launch control. Selecting a heading expands that section and collapses any
+other. Each collapsed heading displays a summary on the right.
+
+| Section | Contents |
+|---|---|
+| **CPU & Performance** | Affinity presets, mask entry, priority, per-CPU grid |
+| **Graphics & NVIDIA** | Adapter list, GPU preference, Threaded Optimization |
+| **Plugin & maintenance** | Plugin state, launch checks, repair actions |
+| **Activity** | Log of launcher operations |
+
+### Status indicators
+
+| Indicator | Meaning |
+|---|---|
+| **Network plugin** | Compares each installed plugin DLL against the staged OTA copy by SHA-256 |
+| **Crashes (7 days)** | Bambu Studio faults recorded in the Windows Application event log |
+| **Log folder** | Total size and crash dump count. Dumps are approximately 50 MB each |
+
+### CPU affinity
+
+The mask is applied using `CREATE_SUSPENDED`, `SetProcessAffinityMask`, and
+`ResumeThread`, so the process is constrained before it executes a single
+instruction and all worker threads created during startup inherit the mask.
+
+Presets are derived from the host topology through
+`GetLogicalProcessorInformationEx`, which reports the efficiency class of each
+core. Preset masks therefore differ between processors. The following are the
+presets generated on an i9-14900KF, which provides 8 hyperthreaded P-cores
+(CPUs 0–15) and 16 E-cores (CPUs 16–31):
+
+| Preset | Mask | CPUs |
+|---|---|---|
+| `P-cores` | `0x5555` | 0, 2, 4, 6, 8, 10, 12, 14 — one thread per P-core |
+| `P + HT` | `0xFFFF` | 0–15 — all P-cores including hyperthreads |
+| `E-cores` | `0xFFFF0000` | 16–31 |
+| `All 32` | `0xFFFFFFFF` | All processors |
+
+On a processor without a hybrid topology, the presets reduce to `Half` and
+`All`. Any mask may be set directly, either by selecting individual CPUs in the
+grid or by entering a hexadecimal value; the two remain synchronised, and the
+preset row highlights whichever preset matches the current mask.
+
+**Priority** sets the process priority class and defaults to Normal.
+
+### Graphics and NVIDIA
+
+This section distinguishes between settings the launcher applies and settings
+it can only report.
+
+**Applied.** *Force the high-performance GPU for Bambu Studio* writes the
+Windows per-application GPU preference to
+`HKCU\Software\Microsoft\DirectX\UserGpuPreferences`. This is a documented,
+user-scope, reversible registry value. It is relevant on portable systems and
+on any machine carrying a virtual display adapter — Parsec, Sunshine, OBS, or a
+KVM — alongside a physical GPU, as Bambu Studio is known to select the incorrect
+adapter when several are present. Clearing the option removes the value.
+
+**Reported only.** NVIDIA's *Threaded Optimization* is incompatible with Bambu
+Studio's threading model and terminates the application during slicing. No
+supported API exists for writing NVIDIA's driver profile database, which is an
+undocumented binary store intended for use by the NVIDIA control panel alone.
+The launcher therefore opens the appropriate application and states the
+required change:
+
+> NVIDIA Control Panel → Manage 3D Settings → Program Settings → add
+> `bambu-studio.exe` → set **Threaded Optimization** to **Off**.
+
+The section additionally reports the presence of the GeForce overlay
+(`nvspcap64.dll`), which injects into Bambu Studio and is a recognised source of
+instability in OpenGL applications.
+
+References:
+[Bambu Lab wiki](https://wiki.bambulab.com/en/bambu-studio/troubleshoot/win-crash-when-slicing),
+[Bambu Lab community forum](https://forum.bambulab.com/t/bambu-studio-crashes-after-slicing-solved-nvidia-problem/162392).
+
+### Plugin and maintenance
+
+| Action | Description |
+|---|---|
+| **Sync plugin from OTA** | Copies stale or missing staged DLLs over the installed files, after taking a backup. Also refreshes `plugins\backup\` so that a failed load cannot revert to the defective build. |
+| **Delete plugin (reinstall)** | Takes a backup, then removes the plugins directory. Bambu Studio offers to download a replacement on next launch. |
+| **Restore backup** | Restores a previous plugin snapshot. |
+| **Clean logs & dumps** | Retains the two most recent crash dumps and removes logs older than one day. |
+| **Diagnostics report** | Writes a text report containing the application version, plugin inventory, log sizes, and a 30-day crash breakdown, suitable for submission with a bug report. |
+| **Close Bambu Studio** | Terminates the process. |
+| **Open data folder** | Opens `%APPDATA%\BambuStudio`. |
+
+Maintenance actions are unavailable while Bambu Studio is running, as the
+plugin DLLs are locked by the process.
+
+Two options govern behaviour at launch. **Check plugin before launch** verifies
+the plugin state and records the result in the activity log. **Auto-repair the
+plugin if it is stale** additionally synchronises from the staged OTA package
+before starting the application; it is disabled by default.
+
+### Crash detection
+
+The launcher retains a handle to the process and reports its exit code on
+termination. Normal exits are logged as such; faults are logged with the
+decoded status, for example `0xC0000005 - access violation`.
+
+## Configuration
+
+Settings are stored in `config.json`, written when the launcher closes.
+
+| Context | Location |
+|---|---|
+| Executable | `%LOCALAPPDATA%\BambuStudioLauncher\` |
+| Source | Alongside the scripts |
+
+The directory also holds `backups/`, containing timestamped plugin snapshots,
+and any generated `diagnostics_*.txt` reports. The separation exists because a
+one-file executable unpacks to a temporary directory that Windows removes on
+exit; settings written beside the executable would not persist.
+
+To target a different Bambu Studio installation, edit the `exe` value in
+`config.json`.
+
+## Building from source
+
+Requires Python 3.10 or later with tkinter, which the standard python.org
+installer provides. The application itself depends only on the standard
+library.
 
 ```
 python bambu_launcher.py
 ```
 
-Python 3.10+ with tkinter, which the standard python.org installer includes.
-No pip installs - the app itself is stdlib only. Pillow is needed only to
-regenerate the icon (`python make_icon.py`), never at runtime.
-
-## What it does
-
-- **Pins Bambu Studio to chosen CPU cores** before it executes a single
-  instruction, with presets built from your machine's real P-core/E-core layout
-- **Catches half-applied plugin updates**, the cause of a repeating crash that
-  is otherwise very hard to diagnose
-- **Applies the Windows per-app GPU preference** and points you at the NVIDIA
-  setting that fixes crash-on-slice
-- **Reports crashes** from the Windows event log, and decodes the exit code
-  when Bambu Studio dies so you know it happened
-- **Cleans up** the crash dumps Bambu Studio never deletes
-
----
-
-## Why it exists
-
-This started as a one-off diagnosis. Bambu Studio was crashing on one machine
-roughly every session — 33 crashes over three weeks, every one of them carrying
-an identical signature:
+To produce the distributable executable:
 
 ```
-Faulting module: bambu_networking.dll
-Exception:       0xC0000005 access violation, READ
-Fault offset:    +0xD5447A          (identical every time)
+pip install pyinstaller
+python build_exe.py
 ```
 
-The cause was a **half-applied plugin update**. Bambu Studio had staged an OTA
-plugin package in `%APPDATA%\BambuStudio\ota\plugins` and applied it to every
-DLL *except* `bambu_networking.dll`, which stayed on an older build while the
-app and its sibling plugins moved forward. The mismatched networking core
-dereferenced a dangling pointer on a worker thread.
+The result is written to `dist/BambuStudioLauncher.exe`.
 
-This launcher checks for that condition before every launch, so a future
-half-applied update gets caught rather than costing another day of crashes.
-
----
-
-## What each control does
-
-### CPU affinity
-
-Replaces the old shortcut:
+### Repository layout
 
 ```
-cmd /c start "" /affinity 55 "C:\Program Files\Bambu Studio\bambu-studio.exe"
+bambu_launcher.py    User interface
+bambu_core.py        Process launching, plugin checks, log cleanup, event log
+build_exe.py         PyInstaller build script
+Bambu Launcher.bat   Runs from source without a console window
+make_icon.py         Generates icon.ico and icon.png (requires Pillow)
+logo_options.py      Renders candidate icon designs for comparison
 ```
-
-The mask is applied with `CREATE_SUSPENDED` → `SetProcessAffinityMask` →
-`ResumeThread`, so the process is pinned **before it executes a single
-instruction**. `start /affinity` sets the mask on an already-running process,
-leaving a brief window in which startup worker threads can be scheduled onto
-cores you meant to exclude. This closes that window.
-
-Presets are computed from **your** machine's actual topology via
-`GetLogicalProcessorInformationEx`, which reports each core's efficiency class,
-so the masks below differ per CPU. This example is an i9-14900KF - 8 P-cores
-(CPUs 0-15, hyperthreaded) plus 16 E-cores (CPUs 16-31):
-
-| Preset | Mask | CPUs |
-|---|---|---|
-| `P-cores` | `0x5555` | 0, 2, 4, 6, 8, 10, 12, 14 — all 8 P-cores, no HT siblings |
-| `P + HT` | `0xFFFF` | 0–15 — 8 P-cores including hyperthreads |
-| `E-cores` | `0xFFFF0000` | 16–31 |
-| `All 32` | `0xFFFFFFFF` | everything |
-
-The original `0x55` preset is gone; `P-cores` supersedes it with twice the
-threads and the same "stay off the E-cores" behaviour. Any mask still works —
-click individual CPU chips or type hex directly, and the two stay in sync. The
-preset row highlights whichever preset the current mask matches, and the
-blue/orange bar under each chip marks P-core vs E-core.
-
-**Priority** sets the process priority class. Leave it on Normal unless you
-want slicing to stay out of the way of something else.
-
-### The window
-
-It opens at 760x300: a status line, four collapsed headings, and Launch.
-Clicking a heading rolls that section down and rolls any other one up, and the
-window resizes to fit. Nothing is more than one click away, and nothing is on
-screen until you ask for it.
-
-| Section | Holds |
-|---|---|
-| **CPU & Performance** | affinity presets, hex mask, priority, per-CPU grid |
-| **Graphics & NVIDIA** | adapter list, GPU preference, Threaded Optimization |
-| **Plugin & maintenance** | plugin state, launch checks, every repair action |
-| **Activity** | running log of what the launcher did |
-
-Each heading carries a summary on the right when collapsed — the active CPU
-preset, the plugin state, the number of log events — so the common case needs
-no clicks at all.
-
-### Status detail
-
-- **Network plugin** — compares every installed plugin DLL against the staged
-  OTA copies by SHA-256. `OUT OF DATE` in red is the exact condition that
-  caused the crashes.
-- **Crashes (7 days)** — reads the Windows Application event log for Bambu
-  faults. Should be `0`.
-- **Log folder** — total size and crash dump count. Dumps are ~50 MB each and
-  Bambu Studio never deletes them, so this folder grows without limit. On the
-  machine this tool was written for it had reached 572 MB.
-
-### Graphics & NVIDIA
-
-Two separate things live here, and the difference matters.
-
-**Applied by the launcher.** *Force the high-performance GPU for Bambu Studio*
-writes the Windows per-app GPU preference
-(`HKCU\Software\Microsoft\DirectX\UserGpuPreferences`) — a documented,
-user-scope, reversible registry value. It matters most on laptops and on
-desktops carrying a virtual display adapter (Parsec, Sunshine, OBS, a KVM)
-alongside a real GPU, since Bambu Studio is known to pick the wrong adapter
-when more than one is present. Untick it to clear the value and hand the
-choice back to Windows.
-
-**Not applied by the launcher.** *Threaded Optimization* is the documented
-NVIDIA fix — the driver feature fights Bambu Studio's threading and kills it
-mid-slice. Both Bambu's own wiki and the community thread say to turn it off
-per-program. There is **no supported API** for writing NVIDIA's driver profile
-database; it is an undocumented binary blob meant only for the control panel or
-NVIDIA Profile Inspector. So the launcher opens the right app and prints the
-exact steps rather than pretending to have set it:
-
-> NVIDIA Control Panel → Manage 3D Settings → Program Settings → add
-> `bambu-studio.exe` → set **Threaded Optimization** to **Off**.
-
-The section also warns when the GeForce overlay (`nvspcap64.dll`) is installed,
-since it injects itself into Bambu Studio and is a known source of instability
-in OpenGL apps.
-
-Sources: [Bambu wiki: win crash when slicing](https://wiki.bambulab.com/en/bambu-studio/troubleshoot/win-crash-when-slicing),
-[forum: crashes after slicing – solved (NVIDIA problem)](https://forum.bambulab.com/t/bambu-studio-crashes-after-slicing-solved-nvidia-problem/162392)
-
-### Maintenance
-
-Everything below lives under **Plugin & maintenance**.
-
-| Action | What it does |
-|---|---|
-| **Sync plugin from OTA** | Copies any stale/missing staged DLL over the installed one. Backs up first. Also refreshes `plugins\backup\` so a failed load can't roll back to the broken build. |
-| **Delete plugin (force reinstall)** | Backs up, then deletes the whole plugins folder. Bambu Studio offers to download a fresh copy on next launch. Use when the plugin is broken and there's no OTA copy to sync from. |
-| **Clean logs & crash dumps** | Deletes all but the 2 newest crash dumps, plus logs older than a day. |
-| **Restore plugin backup…** | Puts back any previous plugins snapshot. |
-| **Save diagnostics report** | Writes a `diagnostics_*.txt` with version, plugin inventory, log sizes and a 30-day crash breakdown — paste-ready for a Bambu bug report. |
-| **Close Bambu Studio** | `taskkill /F`, for when it hangs. |
-| **Open data folder** | Opens `%APPDATA%\BambuStudio`, which holds both `plugins\` and `log\`. |
-
-Maintenance actions refuse to run while Bambu Studio is open, since the DLLs
-are locked — that lock is what caused the original half-applied update.
-
-### Launch options
-
-- **Check plugin before launch** — verifies plugin state and reports it in the
-  Activity log, but launches either way.
-- **Auto-repair the plugin if it is stale** — additionally syncs from OTA
-  before launching. Off by default; turn it on if you'd rather it just fix
-  itself.
-
-Both live under **Plugin & maintenance**.
-
-### Crash detection
-
-The launcher keeps a handle on the process and reports the exit code when it
-ends. A clean quit logs *"exited cleanly"*; a fault logs the decoded status,
-e.g. `0xC0000005 - access violation`. That means you find out a crash happened
-even if you weren't watching.
-
----
-
-## Files
-
-```
-bambu_launcher.py    GUI
-bambu_core.py        logic - launching, plugin checks, log cleanup, event log
-build_exe.py         builds the single-file exe with PyInstaller
-Bambu Launcher.bat   run from source with no console window
-make_icon.py         regenerates icon.ico / icon.png (needs Pillow)
-logo_options.py      renders candidate marks side by side, for iterating
-icon.ico, icon*.png  app icon, 16-256px
-```
-
-### Where your settings live
-
-Running the **exe**, user data goes to `%LOCALAPPDATA%\BambuStudioLauncher\`.
-Running **from source**, it sits beside the scripts. Either way it is:
-
-```
-config.json          written on exit; remembers mask, priority, toggles
-backups/             timestamped plugin snapshots, created on first backup
-diagnostics_*.txt    reports you generate
-```
-
-A one-file exe unpacks itself to a temp directory that Windows deletes on
-exit, which is why the two are kept apart — settings written next to the
-executable would evaporate on every run.
-
-To point at a different Bambu Studio install, edit `exe` in `config.json`.
-
----
 
 ## Notes
 
-- **A pinned mask is not free.** Limiting cores trades slicing speed for
-  stability and a quieter machine. If slicing feels slow, step up a preset or
-  untick *Limit CPUs* entirely.
-- **`plugins\backup\`** is Bambu's own rollback copy. Sync refreshes it; a
-  manual DLL swap does not, so a rollback there could reintroduce an old build.
-- The launcher never touches `BambuStudio.conf`, so your printer profiles,
-  access codes and preferences are untouched by any button here.
-- **The icon** is generated, not hand-drawn — `make_icon.py` renders it at 8x
-  and downsamples, so edit that file rather than the PNGs to change it. The
-  mark is a bamboo shoot: a thick three-segment stalk in mid green with a
-  lighter leaf at the crown. Three things keep it legible when small, and all
-  three were arrived at by rendering candidates at 16px rather than guessing:
-  the stalk segments are taller than they are wide with a tight corner radius
-  (square segments with a big radius read as three stacked pills); the leaf is
-  a lighter tone so it never merges with the stalk under downsampling; and the
-  leaf sits just clear of the stalk rather than touching it, because a leaf
-  whose pointed base lands on the stalk fuses into a hook shape.
-  **Below 24px the leaf is dropped entirely** and the stalk grows to fill the
-  tile — a three-pixel leaf is not a leaf. `SIMPLIFY_BELOW` controls that.
-- `logo_options.py` renders candidate marks side by side at 96/48/32/24/16 on
-  both dark and light grounds. It is how the current mark was chosen; keep it
-  if you want to iterate further, delete it if you don't.
-- **Buy me a coffee** at the bottom left opens <http://buymeacoffee.com/DjjC13>.
+- Restricting cores trades slicing throughput for stability and lower system
+  load. If slicing is slower than acceptable, select a broader preset or
+  disable **Limit CPUs**.
+- `plugins\backup\` is Bambu Studio's own rollback copy. The sync action
+  refreshes it; a manual DLL replacement does not, and a subsequent rollback
+  could therefore reinstate an earlier build.
+- `BambuStudio.conf` is never modified, so printer profiles, access codes, and
+  application preferences are unaffected.
+- The icon is generated by `make_icon.py` at eight times the target size and
+  downsampled. Below 24 pixels the leaf is omitted and the stalk enlarged, as
+  controlled by `SIMPLIFY_BELOW`.
+- **Buy me a coffee** opens <http://buymeacoffee.com/DjjC13>.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

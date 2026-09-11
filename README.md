@@ -56,7 +56,7 @@ other. Each collapsed heading displays a summary on the right.
 |---|---|
 | **CPU & Performance** | Affinity presets, mask entry, priority, per-CPU grid |
 | **Graphics & NVIDIA** | Adapter list, GPU preference, Threaded Optimization |
-| **Plugin & maintenance** | Plugin state, launch checks, repair actions |
+| **Plugin & Maintenance** | Plugin state, launch checks, repair actions |
 | **Activity** | Log of launcher operations |
 
 ### Status indicators
@@ -185,6 +185,11 @@ python build_exe.py
 ```
 
 The result is written to `dist/BambuStudioLauncher.exe`.
+
+PyInstaller does not produce reproducible output: build timestamps and archive
+ordering are embedded in the executable, so a local build is functionally
+identical to the published release but will not match its checksum. The
+SHA-256 published with each release verifies the downloaded asset only.
 
 ### Repository layout
 

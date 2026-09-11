@@ -184,7 +184,7 @@ class Launcher(tk.Tk):
         self.holder.pack(fill="x")
         self._build_section("cpu", "CPU & Performance", self._body_cpu)
         self._build_section("gfx", "Graphics & NVIDIA", self._body_gfx)
-        self._build_section("plugin", "Plugin & maintenance", self._body_plugin)
+        self._build_section("plugin", "Plugin & Maintenance", self._body_plugin)
         self._build_section("log", "Activity", self._body_log)
 
         self._build_bottom(self.root)
@@ -712,7 +712,7 @@ class Launcher(tk.Tk):
                         self.log(msg, "ok" if ok else "err")
                     else:
                         self.log("Launching anyway - tick Auto-repair under "
-                                 "Plugin & maintenance to fix this automatically.", "warn")
+                                 "Plugin & Maintenance to fix this automatically.", "warn")
                 elif st["state"] == "absent":
                     self.log("No plugins installed; Bambu Studio should offer to "
                              "download them.", "warn")
@@ -738,7 +738,7 @@ class Launcher(tk.Tk):
         clean, desc = core.explain_exit_code(code)
         self.log("Bambu Studio {}".format(desc), "ok" if clean else "err")
         if not clean:
-            self.log("Plugin & maintenance → Diagnostics report captures the details.",
+            self.log("Plugin & Maintenance → Diagnostics report captures the details.",
                      "warn")
         self.after(0, self.refresh_status)
 
